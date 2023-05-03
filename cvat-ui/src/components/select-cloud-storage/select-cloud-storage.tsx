@@ -9,7 +9,9 @@ import AutoComplete from 'antd/lib/auto-complete';
 import Input from 'antd/lib/input';
 import { debounce } from 'lodash';
 import { CloudStorage } from 'reducers';
-import { AzureProvider, GoogleCloudProvider, S3Provider } from 'icons';
+import {
+    AzureProvider, GoogleCloudProvider, S3Provider, OwnCloudProvider,
+} from 'icons';
 import { ProviderType } from 'utils/enums';
 import { getCore } from 'cvat-core-wrapper';
 
@@ -114,6 +116,7 @@ function SelectCloudStorage(props: Props): JSX.Element {
                                 _cloudStorage.providerType === ProviderType.GOOGLE_CLOUD_STORAGE &&
                                 <GoogleCloudProvider />
                             }
+                            {_cloudStorage.providerType === ProviderType.OWN_CLOUD && <OwnCloudProvider />}
                             {_cloudStorage.displayName}
                         </span>
                     ),

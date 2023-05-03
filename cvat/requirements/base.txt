@@ -69,6 +69,7 @@ cycler==0.11.0
 datumaro @ git+https://github.com/cvat-ai/datumaro.git@0817144ade1ddc514e182ca1835e322cb9af00a0
     # via -r cvat/requirements/base.in
 defusedxml==0.7.1
+
     # via
     #   datumaro
     #   python3-openid

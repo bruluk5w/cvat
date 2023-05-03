@@ -414,6 +414,7 @@ paths:
           - AZURE_CONTAINER
           - GOOGLE_DRIVE
           - GOOGLE_CLOUD_STORAGE
+          - OWN_CLOUD
       - name: resource
         in: query
         description: A simple equality filter for the resource field
@@ -518,6 +519,20 @@ paths:
                   manifests:
                   - manifest.jsonl
                 summary: Create GCS
+              CreateOwnCloud:
+                value:
+                  provider_type: OWN_CLOUD
+                  resource: /path/to/root
+                  display_name: Directory
+                  credentials_type: KEY_SECRET_KEY_PAIR
+                  key: <user>
+                  secret_key: <token>
+                  specific_attributes: depth=5&endpoint_url=https://my.own.cloud/remote.php/webdav
+                  description: Some description
+                  manifests:
+                  - manifest.jsonl
+                  - or/some/path/to/some_manifest_file.jsonl
+                summary: Create ownCloud storage provider
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/CloudStorageWriteRequest'
@@ -650,6 +665,19 @@ paths:
                   manifests:
                   - manifest.jsonl
                 summary: Create GCS
+              CreateOwnCloud:
+                value:
+                  provider_type: OWN_CLOUD
+                  resource: /path/to/root
+                  display_name: Directory
+                  credentials_type: KEY_SECRET_KEY_PAIR
+                  key: <user>
+                  secret_key: <token>
+                  specific_attributes: depth=5&endpoint_url=https://my.own.cloud/remote.php/webdav
+                  description: Some description
+                  manifests:
+                  - manifest.jsonl
+                  - or/some/path/to/some_manifest_file.jsonl
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/PatchedCloudStorageWriteRequest'
@@ -8440,6 +8468,7 @@ components:
       - AZURE_CONTAINER
       - GOOGLE_DRIVE
       - GOOGLE_CLOUD_STORAGE
+      - OWN_CLOUD
       type: string
     RegisterSerializerEx:
       type: object

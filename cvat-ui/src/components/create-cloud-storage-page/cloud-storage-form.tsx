@@ -10,6 +10,7 @@ import Button from 'antd/lib/button';
 import Form from 'antd/lib/form';
 import Select from 'antd/lib/select';
 import Input from 'antd/lib/input';
+import InputNumber from 'antd/lib/input-number';
 import TextArea from 'antd/lib/input/TextArea';
 import notification from 'antd/lib/notification';
 import Tooltip from 'antd/lib/tooltip';
@@ -20,7 +21,9 @@ import { ProviderType, CredentialsType } from 'utils/enums';
 import { QuestionCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import Upload, { RcFile } from 'antd/lib/upload';
 import Space from 'antd/lib/space';
-import { AzureProvider, S3Provider, GoogleCloudProvider } from '../../icons';
+import {
+    AzureProvider, S3Provider, GoogleCloudProvider, OwnCloudProvider,
+} from '../../icons';
 import S3Region from './s3-region';
 import GCSLocation from './gcs-locatiion';
 import ManifestsManager from './manifests-manager';
@@ -50,6 +53,7 @@ interface CloudStorageForm {
     project_id?: string;
     manifests: string[];
     endpoint_url?: string;
+    depth?: string;
 }
 
 const { Dragger } = Upload;
@@ -124,6 +128,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             const prefix = parsedOptions.get('prefix');
             const projectId = parsedOptions.get('project_id');
             const endpointUrl = parsedOptions.get('endpoint_url');
+            const depth = parsedOptions.get('depth');
 
             if (location) {
                 setSelectedRegion(location);
@@ -136,6 +141,9 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             }
             if (endpointUrl) {
                 fieldsValue.endpoint_url = endpointUrl;
+            }
+            if (depth) {
+                fieldsValue.depth = depth;
             }
         }
 
@@ -212,7 +220,9 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         const cloudStorageData: Record<string, any> = { ...formValues };
         // specific attributes
         const specificAttributes = new URLSearchParams();
-
+        if (cloudStorageData.provider_type === ProviderType.OWN_CLOUD) {
+            cloudStorageData.credentials_type = CredentialsType.KEY_SECRET_KEY_PAIR;
+        }
         if (selectedRegion) {
             if (cloudStorageData.provider_type === ProviderType.AWS_S3_BUCKET) {
                 delete cloudStorageData.region;
@@ -233,6 +243,10 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         if (formValues.endpoint_url) {
             delete cloudStorageData.endpoint_url;
             specificAttributes.append('endpoint_url', formValues.endpoint_url);
+        }
+        if (formValues.depth) {
+            delete cloudStorageData.depth;
+            specificAttributes.append('depth', formValues.depth);
         }
 
         cloudStorageData.specific_attributes = specificAttributes.toString();
@@ -488,6 +502,40 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                 </Form.Item>
             );
         }
+        if (providerType === ProviderType.OWN_CLOUD) {
+            return (
+                <>
+                    <Form.Item
+                        label='ACCESS KEY ID'
+                        name='key'
+                        rules={[{ required: true, message: 'Please, specify your access_key_id' }]}
+                        {...internalCommonProps}
+                    >
+                        <Input.Password
+                            maxLength={128}
+                            visibilityToggle={keyVisibility}
+                            onChange={() => setKeyVisibility(true)}
+                            onFocus={() => onFocusCredentialsItem('key', 'key')}
+                            onBlur={() => onBlurCredentialsItem('key', 'key', setKeyVisibility)}
+                        />
+                    </Form.Item>
+                    <Form.Item
+                        label='SECRET ACCESS KEY ID'
+                        name='secret_key'
+                        rules={[{ required: true, message: 'Please, specify your secret_access_key_id' }]}
+                        {...internalCommonProps}
+                    >
+                        <Input.Password
+                            maxLength={44}
+                            visibilityToggle={secretKeyVisibility}
+                            onChange={() => setSecretKeyVisibility(true)}
+                            onFocus={() => onFocusCredentialsItem('secretKey', 'secret_key')}
+                            onBlur={() => onBlurCredentialsItem('secretKey', 'secret_key', setSecretKeyVisibility)}
+                        />
+                    </Form.Item>
+                </>
+            );
+        }
 
         return <></>;
     };
@@ -632,6 +680,44 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         );
     };
 
+    const OwnCloudConfiguration = (): JSX.Element => {
+        const internalCommonProps = {
+            ...commonProps,
+            labelCol: { offset: 1 },
+            wrapperCol: { offset: 1 },
+        };
+
+        return (
+            <>
+                <Form.Item
+                    label='Root directory'
+                    name='resource'
+                    rules={[{ required: true, message: 'Please, specify a the path to the desired root directory' }]}
+                    {...internalCommonProps}
+                >
+                    <Input disabled={!!cloudStorage} maxLength={512} />
+                </Form.Item>
+                {credentialsBlok()}
+                <Form.Item
+                    label='Endpoint URL'
+                    help='Please specify the WebDAV endpoint for your ownCloud storage'
+                    name='endpoint_url'
+                    {...internalCommonProps}
+                >
+                    <Input />
+                </Form.Item>
+                <Form.Item
+                    label='Depth'
+                    help='The depth specifies how deep into the specified root directory the WebDAV request will descend.'
+                    name='depth'
+                    {...internalCommonProps}
+                >
+                    <InputNumber min={1} />
+                </Form.Item>
+            </>
+        );
+    };
+
     return (
         <Form
             className='cvat-cloud-storage-form'
@@ -682,11 +768,18 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                             Google Cloud Storage
                         </span>
                     </Select.Option>
+                    <Select.Option value={ProviderType.OWN_CLOUD}>
+                        <span className='cvat-cloud-storage-select-provider'>
+                            <OwnCloudProvider />
+                            ownCloud Storage
+                        </span>
+                    </Select.Option>
                 </Select>
             </Form.Item>
             {providerType === ProviderType.AWS_S3_BUCKET && AWSS3Configuration()}
             {providerType === ProviderType.AZURE_CONTAINER && AzureBlobStorageConfiguration()}
             {providerType === ProviderType.GOOGLE_CLOUD_STORAGE && GoogleCloudStorageConfiguration()}
+            {providerType === ProviderType.OWN_CLOUD && OwnCloudConfiguration()}
             <ManifestsManager form={form} manifestNames={manifestNames} setManifestNames={setManifestNames} />
             <Row justify='end'>
                 <Col>

@@ -28,6 +28,13 @@ from cvat.apps.engine.models import CredentialsTypeChoice, CloudProviderChoice
 
 from typing import Optional
 
+import requests
+import datetime
+from functools import partial
+from defusedxml import sax as defused_sax
+from xml import sax as stdsax
+from email.utils import parsedate_to_datetime
+
 class Status(str, Enum):
     AVAILABLE = 'AVAILABLE'
     NOT_FOUND = 'NOT_FOUND'
@@ -193,6 +200,14 @@ def get_cloud_storage_instance(cloud_provider, resource, credentials, specific_a
             prefix=specific_attributes.get('prefix'),
             location=specific_attributes.get('location'),
             project=specific_attributes.get('project')
+        )
+    elif cloud_provider == CloudProviderChoice.OWN_CLOUD:
+        instance = OwnCloud(
+            root_directory=resource,
+            access_key_id=credentials.key,
+            secret_key=credentials.secret_key,
+            endpoint_url=specific_attributes.get('endpoint_url'),
+            depth=specific_attributes.get('depth')
         )
     else:
         raise NotImplementedError()
@@ -381,10 +396,6 @@ class AWS_S3(_CloudStorage):
 class AzureBlobContainer(_CloudStorage):
     MAX_CONCURRENCY = 3
 
-
-    class Effect:
-        pass
-
     def __init__(
         self,
         container: str,
@@ -517,9 +528,6 @@ def _define_gcs_status(func):
 
 class GoogleCloudStorage(_CloudStorage):
 
-    class Effect:
-        pass
-
     def __init__(self, bucket_name, prefix=None, service_account_json=None, anonymous_access=False, project=None, location=None):
         super().__init__()
         if service_account_json:
@@ -614,6 +622,259 @@ class GoogleCloudStorage(_CloudStorage):
     @property
     def supported_actions(self):
         pass
+
+class WebDavParser(stdsax.ContentHandler):
+    def __init__(self):
+        super().__init__()
+        self._path = None
+        self._ns = None
+
+    def _check_path_suffix(self, suffix):
+        for i in range(1, 1 + min(len(self._path), len(suffix))):
+            if self._path[-i] != suffix[-i]:
+                return False
+
+        return True
+
+    def startDocument(self):
+        self._path = []
+        self._ns = None
+
+    def startElement(self, name, attrs):
+        self._path.append(name)
+
+    def endElement(self, name):
+        if not self._check_path_suffix([name]):
+            raise AttributeError('Invalid XML')
+
+        self._path.pop()
+
+    def startElementNS(self, name, qname, attrs):
+        if self._ns is None:
+            self._ns = name[0]
+
+        if name[0] != self._ns:
+            # ignore any tags that might come from another namespace
+            return
+
+        self.startElement(name[1], attrs)
+
+    def endElementNS(self, name, qname):
+        if self._ns is None:
+            raise AttributeError('Invalid XML.')
+
+        if name[0] != self._ns:
+            # ignore any tags that might come from another namespace
+            return
+
+        self.endElement(name[1])
+
+
+class WebDavFileListParser(WebDavParser):
+    def __init__(self):
+        super().__init__()
+        self._files = None
+        self._current_resource = None
+        self._is_collection = None
+
+    @property
+    def files(self):
+        return self._files
+
+    def startDocument(self):
+        super().startDocument()
+        self._files = []
+        self._current_resource = None
+        self._is_collection = None
+
+    def startElement(self, name, attrs):
+        super().startElement(name, attrs)
+        if self._check_path_suffix(['propstat', 'prop', 'resourcetype']):
+            self._is_collection = False
+        elif self._check_path_suffix(
+            ['propstat', 'prop', 'resourcetype', 'collection']
+        ):
+            self._is_collection = True
+
+    def endElement(self, name):
+        super().endElement(name)
+        if name == 'response':
+            if None in {self._is_collection, self._current_resource}:
+                raise AttributeError('Invalid webdav reply.')
+
+            if not self._is_collection:
+                self._files.append(self._current_resource)
+
+            self._current_resource = None
+            self._is_collection = None
+
+    def characters(self, content):
+        if self._check_path_suffix(['response', 'href']):
+            self._current_resource = content
+
+class WebDavSingleModificationDateParser(WebDavParser):
+    def __init__(self):
+        super().__init__()
+        self._date = None
+
+    @property
+    def date(self):
+        return self._date
+
+    def startDocument(self):
+        super().startDocument()
+        self._date = None
+
+    def characters(self, content):
+        if self._check_path_suffix(['response', 'propstat', 'prop', 'getlastmodified']):
+            self._date = content
+
+class OwnCloud(_CloudStorage):
+    def __init__(
+        self,
+        root_directory: str,
+        access_key_id,
+        secret_key,
+        endpoint_url: str,
+        depth: int,
+    ):
+        super().__init__()
+        self._root_directory = root_directory.strip('/')
+        self._access_key_id = access_key_id
+        self._secret_key = secret_key
+        self._endpoint_url = endpoint_url.rstrip('/')
+        self._base_url = self._endpoint_url + '/' + self._root_directory
+        self._depth = abs(int(depth))
+
+    def _request(self, method, path='', xml_body=None, **kwargs) -> requests.Response:
+        if method in {'delete', 'get', 'head', 'options', 'post', 'patch', 'put'}:
+            method_func = getattr(requests, method)
+        else:
+            method_func = partial(requests.request, method)
+
+        if 'url' in kwargs or 'auth' in kwargs or 'data' in kwargs:
+            raise ValueError('Invalid argument')
+
+        headers = {}
+        if 'headers' in kwargs:
+            headers = kwargs['headers']
+            del kwargs['headers']
+
+        if xml_body is not None:
+            if (
+                'Content-Type' in headers
+                and headers['Content-Type'] != 'application/xml'
+            ):
+                raise ValueError('Invalid content type in header')
+
+            headers['Content-Type'] = 'application/xml'
+            if 'Accept' in headers and headers['Accept'] != 'application/xml':
+                raise ValueError('Invalid accept header')
+
+            headers['Accept'] = 'application/xml'
+
+        return method_func(
+            self._base_url + '/' + path.strip('/'),
+            auth=(self._access_key_id, self._secret_key),
+            data=xml_body,
+            headers=headers,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _parse_xml(response: requests.Response, handler: stdsax.ContentHandler):
+        if not any(ct.lower().startswith('application/xml') for ct in (
+            response.headers.get('Content-Type', None),
+            response.headers.get('content-type', None)
+        )):
+            return []
+
+        parser = defused_sax.make_parser()
+        parser.setFeature(stdsax.handler.feature_namespaces, True)
+        parser.setContentHandler(handler)
+        parser.setErrorHandler(stdsax.ErrorHandler())
+        input_src = stdsax.InputSource()
+        input_src.setByteStream(BytesIO(response.content))
+        parser.parse(input_src)
+
+    @property
+    def name(self):
+        return '{} @ ownCloud'.format(self._root_directory)
+
+    def _head(self):
+        return self._head_file('')
+
+    def _head_file(self, key):
+        return self._request('head', key)
+
+    def get_status(self):
+        return self.get_file_status('')
+
+    def get_file_status(self, key):
+        try:
+            response = self._head_file(key)
+            if response.status_code > 300:
+                if response.status_code in {401, 403, 405}:
+                    return Status.FORBIDDEN
+
+                return Status.NOT_FOUND
+        except requests.exceptions.RequestException:
+            return Status.NOT_FOUND
+
+        return Status.AVAILABLE
+
+    def initialize_content(self):
+        response = self._request(
+            'PROPFIND',
+            xml_body='<propfind xmlns="DAV:"><prop><resourcetype/></prop></propfind>',
+            headers={'Depth': str(self._depth)},
+        )
+        content_handler = WebDavFileListParser()
+        self._parse_xml(response, content_handler)
+        self._files = [
+            {
+                'name': file.replace('/', '#'),
+                'location': file.removeprefix(self._base_url),
+            }
+            for file in content_handler.files
+        ]
+
+    @validate_file_status
+    @validate_bucket_status
+    def download_fileobj(self, key):
+        response = self._request('get', key)
+        return BytesIO(response.content)
+
+    @validate_bucket_status
+    def upload_fileobj(self, file_obj, file_name):
+        raise NotImplementedError('READ ONLY ACCESS')
+
+    @validate_bucket_status
+    def upload_file(self, file_path, file_name=None):
+        raise NotImplementedError('READ ONLY ACCESS')
+
+
+    def create(self):
+        raise NotImplementedError('READ ONLY ACCESS')
+
+    @validate_file_status
+    @validate_bucket_status
+    def get_file_last_modified(self, key):
+        response = self._request(
+            'PROPFIND', key,
+            xml_body='<propfind xmlns="DAV:"><prop><getlastmodified/></prop></propfind>',
+            headers={'Depth': '1'},
+        )
+
+        contentHandler = WebDavSingleModificationDateParser()
+        self._parse_xml(response, contentHandler)
+        # rfc1123-date
+        return parsedate_to_datetime(contentHandler.date)
+
+    @property
+    def supported_actions(self):
+        return {Permissions.READ}
+
 
 class Credentials:
     __slots__ = ('key', 'secret_key', 'session_token', 'account_name', 'key_file_path', 'credentials_type', 'connection_string')

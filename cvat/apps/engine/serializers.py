@@ -1522,6 +1522,26 @@ class CloudStorageReadSerializer(serializers.ModelSerializer):
                 ],
             },
             request_only=True,
+        ),
+        OpenApiExample(
+            'Create AWS S3 cloud storage with credentials',
+            description='',
+            value={
+                'provider_type': models.CloudProviderChoice.OWN_CLOUD,
+                'resource': '/path/to/root',
+                'display_name': 'Directory',
+                'credentials_type': models.CredentialsTypeChoice.KEY_SECRET_KEY_PAIR,
+                'key': '<user>',
+                'secret_key': '<token>',
+                'specific_attributes': 'depth=5&endpoint_url=https://my.own.cloud/remote.php/webdav',
+                'description': 'Some description',
+                'manifests': [
+                    'manifest.jsonl',
+                    'or/some/path/to/some_manifest_file.jsonl'
+                ],
+
+            },
+            request_only=True,
         )
     ]
 )
@@ -1560,6 +1580,14 @@ class CloudStorageWriteSerializer(serializers.ModelSerializer):
         if provider_type == models.CloudProviderChoice.AZURE_CONTAINER:
             if not attrs.get('account_name', '') and not attrs.get('connection_string', ''):
                 raise serializers.ValidationError('Account name or connection string for Azure container was not specified')
+        if provider_type == models.CloudProviderChoice.OWN_CLOUD:
+            if not attrs.get('key', '') or not attrs.get('secret_key', ''):
+                raise serializers.ValidationError('Key or secret for ownCloud storage was not specified')
+            specific_attrs = (a.split('=') for a in attrs.get('specific_attributes', '').split('&'))
+            specific_attr_names = {a[0] for a in specific_attrs if len(a)}
+            if 'endpoint_url' not in specific_attr_names or 'depth' not in specific_attr_names:
+                raise serializers.ValidationError('depth or endpoint url for ownCloud storage was not specified')
+
         return attrs
 
     @staticmethod

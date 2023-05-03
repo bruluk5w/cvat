@@ -3126,10 +3126,31 @@ const frameMetaDummyData = {
 };
 
 const cloudStoragesDummyData = {
-    count: 3,
+    count: 4,
     next: null,
     previous: null,
     results: [
+        {
+            id: 4,
+            owner: {
+                url: 'http://localhost:7000/api/users/1',
+                id: 1,
+                username: 'maya',
+                first_name: '',
+                last_name: ''
+            },
+            manifests: [
+                'manifest.jsonl'
+            ],
+            provider_type: 'OWN_CLOUD',
+            resource: '/subfolder',
+            display_name: 'Demonstration OwnCloud directory',
+            created_date: '2021-09-01T09:29:47.094244Z',
+            updated_date: '2021-09-01T09:29:47.103264Z',
+            credentials_type: 'KEY_SECRET_KEY_PAIR',
+            specific_attributes: '',
+            description: 'It is first ownCloud directory'
+        },
         {
             id: 3,
             owner: {
